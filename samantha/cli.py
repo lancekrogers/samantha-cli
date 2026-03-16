@@ -1,6 +1,6 @@
 """CLI entry point for Samantha.
 
-Provides the main `samantha` command and the `samantha config` subcommand.
+Provides the main `samantha` command and subcommands.
 """
 
 from __future__ import annotations
@@ -43,16 +43,130 @@ def resume(session_id: str | None) -> None:
     brain = Brain(max_history=settings["max_history"])
 
     if session_id:
-        # Resume specific Claude session
         brain._resume_id = session_id
         console.print(f"  Resuming session {session_id}...", style="green")
     else:
-        # Continue most recent Claude session
         brain._continue_mode = True
         console.print("  Continuing last session...", style="green")
 
     console.print()
     _run_assistant(text_mode=False, no_voice=False, brain=brain)
+
+
+@main.command("test")
+def test_audio() -> None:
+    """Test your microphone and speaker to verify they work."""
+    console = Console()
+    settings = cfg.load()
+    voice = VoiceEngine(settings)
+
+    console.print("\n  [bold magenta]Samantha Audio Test[/bold magenta]")
+    console.print(f"  [dim]TTS: {settings['tts_provider']} | STT: {settings['stt_provider']}[/dim]\n")
+
+    # --- Test 1: Speaker / TTS ---
+    console.print("  [bold]1. Testing speaker (TTS)...[/bold]")
+    if not voice.tts_available:
+        provider = settings["tts_provider"]
+        if provider == "fish":
+            console.print("  [red]FAIL:[/red] Fish Audio not available (missing API key or package).")
+            console.print("  [dim]Fix: samantha config fish_api_key YOUR_KEY[/dim]\n")
+        else:
+            console.print(f"  [red]FAIL:[/red] TTS provider '{provider}' not available.\n")
+    else:
+        try:
+            voice.speak("Hello! I'm Samantha. Your speaker is working.")
+            console.print("  [green]PASS:[/green] Speaker working.\n")
+        except Exception as e:
+            console.print(f"  [red]FAIL:[/red] {e}\n")
+
+    # --- Test 2: Microphone / STT ---
+    console.print("  [bold]2. Testing microphone (STT)...[/bold]")
+    if not voice.stt_available:
+        provider = settings["stt_provider"]
+        if provider == "whisper":
+            console.print("  [red]FAIL:[/red] faster-whisper not installed.")
+            console.print("  [dim]Fix: uv pip install samantha-cli[whisper][/dim]\n")
+        else:
+            console.print("  [red]FAIL:[/red] SpeechRecognition or PyAudio not installed.\n")
+    else:
+        console.print("  [dim]Speak something now (you have 5 seconds)...[/dim]")
+        try:
+            text = voice.stt.transcribe(timeout=5, phrase_time_limit=5)
+            if text:
+                console.print(f'  [green]PASS:[/green] Heard: "{text}"\n')
+            else:
+                console.print("  [yellow]WARN:[/yellow] Heard audio but couldn't understand it.\n")
+        except RuntimeError as e:
+            console.print(f"  [red]FAIL:[/red] {e}\n")
+
+    console.print("  [bold magenta]Test complete.[/bold magenta]\n")
+
+
+@main.command("voices")
+@click.option("--provider", "-p", default=None, help="TTS provider to list voices for.")
+@click.option("--gender", "-g", default="", help="Filter by gender (male/female).")
+@click.option("--locale", "-l", default="", help="Filter by locale (e.g. en-US).")
+def voices(provider: str | None, gender: str, locale: str) -> None:
+    """List available TTS voices for the current provider."""
+    console = Console()
+    settings = cfg.load()
+
+    if provider:
+        settings["tts_provider"] = provider
+    voice = VoiceEngine(settings)
+
+    active_provider = settings["tts_provider"]
+    console.print(f"\n  [bold magenta]Voices for: {active_provider}[/bold magenta]\n")
+
+    voice_list = voice.tts.list_voices(locale=locale, gender=gender)
+    if not voice_list:
+        console.print("  [dim]No voices found (provider may not support listing).[/dim]\n")
+        return
+
+    for v in voice_list:
+        console.print(
+            f"  [cyan]{v['name']}[/cyan]  "
+            f"{v.get('friendly_name', '')}  "
+            f"[dim]{v.get('gender', '')} / {v.get('locale', '')}[/dim]"
+        )
+    console.print(f"\n  [dim]{len(voice_list)} voices found.[/dim]\n")
+
+
+@main.command("providers")
+def providers() -> None:
+    """Show available TTS and STT providers."""
+    console = Console()
+    settings = cfg.load()
+
+    console.print("\n  [bold magenta]Providers[/bold magenta]\n")
+
+    # TTS
+    console.print("  [bold]TTS (text-to-speech):[/bold]")
+    tts_active = settings["tts_provider"]
+    tts_options = [
+        ("edge", "edge-tts", "Free, no API key", True),
+        ("fish", "fish-audio-sdk", "Paid, custom voice clones", _check_import("fishaudio")),
+    ]
+    for name, pkg, desc, installed in tts_options:
+        marker = "[green]active[/green]" if name == tts_active else ("[dim]ready[/dim]" if installed else "[yellow]not installed[/yellow]")
+        install_hint = "" if installed else f"  [dim](uv pip install samantha-cli[{name}])[/dim]"
+        console.print(f"    [{marker}] [cyan]{name}[/cyan] — {desc}{install_hint}")
+
+    console.print()
+
+    # STT
+    console.print("  [bold]STT (speech-to-text):[/bold]")
+    stt_active = settings["stt_provider"]
+    stt_options = [
+        ("google", "SpeechRecognition", "Free, requires internet", True),
+        ("whisper", "faster-whisper", "Local, no internet needed", _check_import("faster_whisper")),
+    ]
+    for name, pkg, desc, installed in stt_options:
+        marker = "[green]active[/green]" if name == stt_active else ("[dim]ready[/dim]" if installed else "[yellow]not installed[/yellow]")
+        install_hint = "" if installed else f"  [dim](uv pip install samantha-cli[{name}])[/dim]"
+        console.print(f"    [{marker}] [cyan]{name}[/cyan] — {desc}{install_hint}")
+
+    console.print()
 
 
 @main.command("config")
@@ -64,13 +178,12 @@ def config(key: str | None, value: str | None) -> None:
     \b
     Examples:
         samantha config                  # Show all config
-        samantha config fish_api_key     # Show one value
-        samantha config fish_api_key sk-xxx  # Set a value
+        samantha config tts_provider     # Show one value
+        samantha config tts_voice en-US-JennyNeural  # Set a value
     """
     console = Console()
 
     if key is None:
-        # Show all config
         current = cfg.load()
         console.print("\n  [bold magenta]Samantha Configuration[/bold magenta]")
         console.print(f"  [dim]Config file: {cfg.CONFIG_FILE}[/dim]\n")
@@ -81,7 +194,6 @@ def config(key: str | None, value: str | None) -> None:
         return
 
     if value is None:
-        # Show one value
         current = cfg.load()
         if key in current:
             display_value = _mask_secret(key, current[key])
@@ -91,7 +203,6 @@ def config(key: str | None, value: str | None) -> None:
             console.print(f"  [dim]Available: {', '.join(cfg.DEFAULTS.keys())}[/dim]")
         return
 
-    # Set value -- try to cast to the right type
     if key not in cfg.DEFAULTS:
         console.print(f"  [red]Unknown key:[/red] {key}")
         console.print(f"  [dim]Available: {', '.join(cfg.DEFAULTS.keys())}[/dim]")
@@ -114,6 +225,15 @@ def _mask_secret(key: str, value) -> str:
     return str(value)
 
 
+def _check_import(module: str) -> bool:
+    """Check if a Python module is importable."""
+    try:
+        __import__(module)
+        return True
+    except ImportError:
+        return False
+
+
 def _run_assistant(text_mode: bool = False, no_voice: bool = False, brain: Brain | None = None) -> None:
     """Main conversation loop."""
     ui = UI()
@@ -130,35 +250,29 @@ def _run_assistant(text_mode: bool = False, no_voice: bool = False, brain: Brain
         sys.exit(1)
 
     # --- Initialize voice engine ---
-    voice = VoiceEngine(
-        fish_api_key=settings["fish_api_key"] if not no_voice else "",
-        voice_model_id=settings["voice_model_id"],
-        speech_speed=settings["speech_speed"],
-        language=settings["language"],
-        listen_timeout=settings["listen_timeout"],
-        phrase_time_limit=settings["phrase_time_limit"],
-    )
+    if no_voice:
+        settings["tts_provider"] = "_disabled"
+    voice = VoiceEngine(settings)
 
     # Warn about missing config
     if not text_mode and not voice.stt_available:
         ui.show_error(
-            "SpeechRecognition or PyAudio not installed. "
-            "Falling back to text mode.\n"
-            "         Install: pip install SpeechRecognition PyAudio"
+            "STT provider not available. Falling back to text mode.\n"
+            "         Check: samantha providers"
         )
         text_mode = True
 
     if not no_voice and not voice.tts_available:
         ui.show_info(
-            "No Fish Audio API key configured. Running without voice output.\n"
-            "         Set it: samantha config fish_api_key YOUR_KEY"
+            "TTS provider not available. Running without voice output.\n"
+            "         Check: samantha providers"
         )
 
     # Wire up activity callback so we can see what Claude is doing
     brain._activity_callback = lambda msg: ui.show_info(f"  {msg}")
 
-    # Show models in use
-    ui.show_info("Brain: Opus (thinking) → Haiku (voice summary) → Fish Audio (TTS)")
+    # Show active providers
+    ui.show_info(f"TTS: {settings['tts_provider']} | STT: {settings['stt_provider']}")
 
     # --- Start ---
     ui.show_welcome()
@@ -211,7 +325,7 @@ def _conversation_loop(
         # --- Natural language commands ---
         cmd = user_input.strip().lower()
 
-        # Exit - only exact short commands or full phrases (not partial word matches)
+        # Exit
         if cmd in ("exit", "quit", "bye", "goodbye", "stop", "/exit", "/q"):
             break
         exit_phrases = [
@@ -250,7 +364,6 @@ def _conversation_loop(
         # Show full Opus response if it was summarized
         full = getattr(brain, '_full_response', response)
         if full != response and len(full) > len(response):
-            # Show the full Claude output in dim, then the spoken version
             from rich.text import Text
             from rich.panel import Panel
             ui.console.print(Panel(

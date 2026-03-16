@@ -18,13 +18,33 @@ CONFIG_DIR = Path.home() / ".samantha"
 CONFIG_FILE = CONFIG_DIR / "config.yaml"
 
 DEFAULTS: dict[str, Any] = {
-    "fish_api_key": "",
-    "voice_model_id": "474887f7949b4d1ab3e626cddf82613a",
+    # TTS settings
+    "tts_provider": "edge",
+    "tts_voice": "en-US-AriaNeural",
     "speech_speed": 0.95,
+
+    # STT settings
+    "stt_provider": "google",
+    "whisper_model": "base",
+
+    # Fish Audio (only when tts_provider == "fish")
+    "fish_api_key": "",
+    "fish_voice_model_id": "474887f7949b4d1ab3e626cddf82613a",
+
+    # General
     "language": "en-US",
     "max_history": 10,
     "listen_timeout": 10,
     "phrase_time_limit": 30,
+}
+
+# Environment variable name -> config key
+_ENV_OVERRIDES = {
+    "TTS_PROVIDER": "tts_provider",
+    "TTS_VOICE": "tts_voice",
+    "STT_PROVIDER": "stt_provider",
+    "WHISPER_MODEL": "whisper_model",
+    "FISH_API_KEY": "fish_api_key",
 }
 
 
@@ -33,11 +53,16 @@ def _ensure_config_dir() -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _migrate(config: dict[str, Any]) -> None:
+    """Migrate old config keys to new names."""
+    if "voice_model_id" in config and "fish_voice_model_id" not in config:
+        config["fish_voice_model_id"] = config.pop("voice_model_id")
+
+
 def load() -> dict[str, Any]:
     """Load configuration from disk, falling back to defaults.
 
-    Environment variables override file values:
-        FISH_API_KEY -> fish_api_key
+    Environment variables override file values.
     """
     config = dict(DEFAULTS)
 
@@ -45,14 +70,15 @@ def load() -> dict[str, Any]:
         try:
             with open(CONFIG_FILE) as f:
                 stored = yaml.safe_load(f) or {}
+            _migrate(stored)
             config.update(stored)
         except (yaml.YAMLError, OSError):
-            pass  # Fall back to defaults silently
+            pass
 
-    # Environment variable overrides
-    env_key = os.environ.get("FISH_API_KEY")
-    if env_key:
-        config["fish_api_key"] = env_key
+    for env_name, config_key in _ENV_OVERRIDES.items():
+        val = os.environ.get(env_name)
+        if val:
+            config[config_key] = val
 
     return config
 
