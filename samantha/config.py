@@ -10,6 +10,9 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from dotenv import load_dotenv
+
+load_dotenv()
 
 CONFIG_DIR = Path.home() / ".samantha"
 CONFIG_FILE = CONFIG_DIR / "config.yaml"
