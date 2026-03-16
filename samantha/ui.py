@@ -2,6 +2,9 @@
 
 Provides a clean, minimal display with status indicators
 and a scrolling conversation transcript.
+
+The UI can subscribe to an EventBus to receive events from
+the ConversationEngine, keeping display fully decoupled from logic.
 """
 
 from __future__ import annotations
@@ -14,6 +17,25 @@ from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
+
+from samantha.events import (
+    EventBus,
+    Event,
+    ReadyForInput,
+    UserInput,
+    STTPhase,
+    ThinkingStarted,
+    ThinkingComplete,
+    GeneratingVoice,
+    VoiceGenerated,
+    SpeakingStarted,
+    SpeakingComplete,
+    ResponseReady,
+    ConversationCleared,
+    Error,
+    Info,
+    SessionExit,
+)
 
 
 class Status(Enum):
@@ -232,3 +254,94 @@ class UI:
         """Move cursor up to overwrite the last status line."""
         # Move up one line and clear it
         self.console.print("\033[A\033[2K", end="")
+
+    # --- Event bus integration ---
+
+    def subscribe_to(self, bus: EventBus) -> None:
+        """Wire this UI up to an EventBus so it reacts to engine events.
+
+        Call bus.unsubscribe_all() then ui.subscribe_to(bus) to hot-reload.
+        """
+        self._bus = bus
+
+        bus.subscribe(STTPhase, self._on_stt_phase)
+        bus.subscribe(UserInput, self._on_user_input)
+        bus.subscribe(ThinkingStarted, self._on_thinking_started)
+        bus.subscribe(ThinkingComplete, self._on_thinking_complete)
+        bus.subscribe(GeneratingVoice, self._on_generating_voice)
+        bus.subscribe(VoiceGenerated, self._on_voice_generated)
+        bus.subscribe(SpeakingStarted, self._on_speaking_started)
+        bus.subscribe(SpeakingComplete, self._on_speaking_complete)
+        bus.subscribe(ResponseReady, self._on_response_ready)
+        bus.subscribe(ConversationCleared, self._on_cleared)
+        bus.subscribe(Error, self._on_error)
+        bus.subscribe(Info, self._on_info)
+
+    def _on_stt_phase(self, event: STTPhase) -> None:
+        """Handle STT phase transitions (listening, hearing, transcribing)."""
+        phase = event.phase
+        elapsed = event.elapsed
+
+        # If there's timing from a previous phase, show it
+        if elapsed > 0:
+            self.mic.stop()
+            self.show_step(phase, elapsed)
+            return
+
+        # Drive the mic animation for current phase
+        if phase == "listening":
+            self.mic.start("Listening...", "green")
+        elif phase == "hearing":
+            self.mic.update_label("Hearing you...", "green")
+        elif phase in ("loading_model", "transcribing"):
+            self.mic.stop()
+            self.show_status(Status.TRANSCRIBING)
+        else:
+            self.mic.start("Listening...", "green")
+
+    def _on_user_input(self, event: UserInput) -> None:
+        self.mic.stop()
+        self.show_user(event.text)
+
+    def _on_thinking_started(self, event: ThinkingStarted) -> None:
+        self.show_status(Status.THINKING)
+
+    def _on_thinking_complete(self, event: ThinkingComplete) -> None:
+        self.clear_status()
+        self.show_step("claude thinking", event.elapsed)
+
+        # Show full Opus response if it was summarized
+        if event.full_response != event.response and len(event.full_response) > len(event.response):
+            self.console.print(Panel(
+                Text(event.full_response, style="dim"),
+                title="[dim]Claude (Opus)[/]",
+                border_style="dim",
+                padding=(0, 1),
+            ))
+
+    def _on_generating_voice(self, event: GeneratingVoice) -> None:
+        self.show_status(Status.GENERATING)
+
+    def _on_voice_generated(self, event: VoiceGenerated) -> None:
+        self.clear_status()
+        self.show_step("voice generation", event.elapsed)
+
+    def _on_speaking_started(self, event: SpeakingStarted) -> None:
+        self.show_status(Status.SPEAKING)
+
+    def _on_speaking_complete(self, event: SpeakingComplete) -> None:
+        self.show_step("playback", event.elapsed)
+
+    def _on_response_ready(self, event: ResponseReady) -> None:
+        self.clear_status()
+        self.show_samantha(event.response)
+
+    def _on_cleared(self, event: ConversationCleared) -> None:
+        self.show_info("Conversation cleared.")
+
+    def _on_error(self, event: Error) -> None:
+        self.mic.stop()
+        self.show_error(event.message)
+
+    def _on_info(self, event: Info) -> None:
+        self.show_info(event.message)

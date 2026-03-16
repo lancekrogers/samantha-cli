@@ -13,6 +13,8 @@ from rich.console import Console
 from samantha import __version__
 from samantha import config as cfg
 from samantha.brain import Brain
+from samantha.events import EventBus
+from samantha.engine import ConversationEngine
 from samantha.ui import UI, Status
 from samantha.voice import VoiceEngine, TTSError
 
@@ -236,7 +238,7 @@ def _check_import(module: str) -> bool:
 
 
 def _run_assistant(text_mode: bool = False, no_voice: bool = False, brain: Brain | None = None) -> None:
-    """Main conversation loop."""
+    """Main conversation loop -- wires the engine to the UI via events."""
     ui = UI()
     settings = cfg.load()
 
@@ -275,179 +277,33 @@ def _run_assistant(text_mode: bool = False, no_voice: bool = False, brain: Brain
     # Show active providers
     ui.show_info(f"TTS: {settings['tts_provider']} | STT: {settings['stt_provider']}")
 
+    # --- Set up event bus and engine ---
+    bus = EventBus()
+    ui.subscribe_to(bus)
+
+    # Text-mode input goes through the UI console
+    def _text_input() -> str:
+        return ui.console.input("  [bold cyan]You:[/bold cyan] ").strip()
+
+    engine = ConversationEngine(
+        brain=brain,
+        voice=voice,
+        bus=bus,
+        text_mode=text_mode,
+        input_fn=_text_input,
+    )
+
     # --- Start ---
     ui.show_welcome()
 
     try:
-        _conversation_loop(ui, brain, voice, text_mode)
+        engine.run()
     except (KeyboardInterrupt, EOFError):
         pass
     finally:
         ui.mic.stop()
         voice.cleanup()
         ui.show_goodbye()
-
-
-def _conversation_loop(
-    ui: UI,
-    brain: Brain,
-    voice: VoiceEngine,
-    text_mode: bool,
-) -> None:
-    """Run the listen-think-speak loop until interrupted."""
-    import time
-
-    # Wire up STT status callback to drive the mic animation
-    _phase_times: dict[str, float] = {}
-
-    def _on_stt_status(phase: str) -> None:
-        now = time.monotonic()
-        # Log timing of previous phase
-        if _phase_times.get("last_phase"):
-            prev = _phase_times["last_phase"]
-            elapsed = now - _phase_times.get("last_time", now)
-            ui.mic.stop()
-            ui.show_step(prev, elapsed)
-        _phase_times["last_phase"] = phase
-        _phase_times["last_time"] = now
-
-        if phase == "listening":
-            ui.mic.start("Listening...", "green")
-        elif phase == "hearing":
-            ui.mic.update_label("Hearing you...", "green")
-        elif phase in ("loading_model", "transcribing"):
-            ui.mic.stop()
-            ui.show_status(Status.TRANSCRIBING)
-        else:
-            ui.mic.start("Listening...", "green")
-
-    voice.stt.on_status = _on_stt_status
-
-    while True:
-        # --- 1. Get user input ---
-        if text_mode:
-            try:
-                user_input = ui.console.input("  [bold cyan]You:[/bold cyan] ").strip()
-            except EOFError:
-                break
-            if not user_input:
-                continue
-        else:
-            _phase_times.clear()
-            t0 = time.monotonic()
-            try:
-                user_input = voice.listen()
-            except KeyboardInterrupt:
-                ui.mic.stop()
-                break
-            except RuntimeError as e:
-                ui.mic.stop()
-                ui.show_error(str(e))
-                ui.show_info("Switching to text mode.")
-                text_mode = True
-                continue
-
-            ui.mic.stop()
-
-            # Show final phase timing
-            if _phase_times.get("last_phase"):
-                elapsed = time.monotonic() - _phase_times.get("last_time", t0)
-                ui.show_step(_phase_times["last_phase"], elapsed)
-
-            if user_input is None:
-                continue  # Silence or unrecognized -- keep listening
-
-            ui.show_user(user_input)
-
-        # --- Natural language commands ---
-        cmd = user_input.strip().lower()
-
-        # Exit
-        if cmd in ("exit", "quit", "bye", "goodbye", "stop", "/exit", "/q"):
-            break
-        exit_phrases = [
-            "gotta go", "got to go", "i'm out", "i'm done", "wrap up",
-            "talk later", "see you later", "see ya", "good night",
-            "signing off", "peace out", "catch you later", "bye samantha",
-            "bye bye", "that's all", "we're done", "samantha exit",
-            "samantha quit", "samantha bye",
-        ]
-        if any(cmd == phrase for phrase in exit_phrases):
-            break
-
-        # Clear conversation
-        if any(phrase in cmd for phrase in [
-            "forget everything", "start over", "clear the conversation",
-            "fresh start", "new conversation", "reset",
-        ]) or cmd in ("/clear", "/c"):
-            brain.history.clear()
-            brain._first_sent = False
-            brain._save_history()
-            ui.show_info("Conversation cleared.")
-            continue
-
-        # --- 2. Think ---
-        ui.show_status(Status.THINKING)
-        t0 = time.monotonic()
-        try:
-            response = brain.think(user_input)
-        except (RuntimeError, TimeoutError) as e:
-            ui.clear_status()
-            ui.show_error(str(e))
-            continue
-
-        think_time = time.monotonic() - t0
-        ui.clear_status()
-        ui.show_step("claude thinking", think_time)
-
-        # --- 3. Respond ---
-        # Show full Opus response if it was summarized
-        full = getattr(brain, '_full_response', response)
-        if full != response and len(full) > len(response):
-            from rich.text import Text
-            from rich.panel import Panel
-            ui.console.print(Panel(
-                Text(full, style="dim"),
-                title="[dim]Claude (Opus)[/]",
-                border_style="dim",
-                padding=(0, 1),
-            ))
-
-        if voice.tts_available and not text_mode:
-            # --- Generate audio ---
-            ui.show_status(Status.GENERATING)
-            t0 = time.monotonic()
-            try:
-                audio_path = voice.generate_audio(response)
-            except TTSError as e:
-                ui.clear_status()
-                ui.show_samantha(response)
-                ui.show_info(f"Voice output failed: {e}")
-                continue
-
-            gen_time = time.monotonic() - t0
-            ui.clear_status()
-            ui.show_step("voice generation", gen_time)
-
-            # --- Play audio ---
-            if audio_path:
-                ui.show_status(Status.SPEAKING)
-                import threading
-
-                player = threading.Thread(target=voice.play_audio, args=(audio_path,), daemon=True)
-                t0 = time.monotonic()
-                player.start()
-
-                ui.clear_status()
-                ui.show_samantha(response)
-
-                player.join()
-                play_time = time.monotonic() - t0
-                ui.show_step("playback", play_time)
-            else:
-                ui.show_samantha(response)
-        else:
-            ui.show_samantha(response)
 
 
 if __name__ == "__main__":
