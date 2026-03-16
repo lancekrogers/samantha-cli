@@ -294,6 +294,8 @@ def _conversation_loop(
     text_mode: bool,
 ) -> None:
     """Run the listen-think-speak loop until interrupted."""
+    import time
+
     while True:
         # --- 1. Get user input ---
         if text_mode:
@@ -305,6 +307,7 @@ def _conversation_loop(
                 continue
         else:
             ui.show_status(Status.LISTENING)
+            t0 = time.monotonic()
             try:
                 user_input = voice.listen()
             except KeyboardInterrupt:
@@ -316,12 +319,14 @@ def _conversation_loop(
                 text_mode = True
                 continue
 
+            listen_time = time.monotonic() - t0
             ui.clear_status()
 
             if user_input is None:
                 continue  # Silence or unrecognized -- keep listening
 
             ui.show_user(user_input)
+            ui.show_step("listen + transcribe", listen_time)
 
         # --- Natural language commands ---
         cmd = user_input.strip().lower()
@@ -352,6 +357,7 @@ def _conversation_loop(
 
         # --- 2. Think ---
         ui.show_status(Status.THINKING)
+        t0 = time.monotonic()
         try:
             response = brain.think(user_input)
         except (RuntimeError, TimeoutError) as e:
@@ -359,7 +365,9 @@ def _conversation_loop(
             ui.show_error(str(e))
             continue
 
+        think_time = time.monotonic() - t0
         ui.clear_status()
+        ui.show_step("claude thinking", think_time)
 
         # --- 3. Respond ---
         # Show full Opus response if it was summarized
@@ -375,30 +383,40 @@ def _conversation_loop(
             ))
 
         if voice.tts_available and not text_mode:
-            ui.show_status(Status.SPEAKING)
+            # --- Generate audio ---
+            ui.show_status(Status.GENERATING)
+            t0 = time.monotonic()
             try:
-                import threading
-
                 audio_path = voice.generate_audio(response)
-                if audio_path:
-                    player = threading.Thread(target=voice.play_audio, args=(audio_path,), daemon=True)
-                    player.start()
-
-                    ui.clear_status()
-                    ui.show_samantha(response)
-
-                    player.join()
-                else:
-                    ui.clear_status()
-                    ui.show_samantha(response)
             except TTSError as e:
                 ui.clear_status()
                 ui.show_samantha(response)
                 ui.show_info(f"Voice output failed: {e}")
+                continue
+
+            gen_time = time.monotonic() - t0
+            ui.clear_status()
+            ui.show_step("voice generation", gen_time)
+
+            # --- Play audio ---
+            if audio_path:
+                ui.show_status(Status.SPEAKING)
+                import threading
+
+                player = threading.Thread(target=voice.play_audio, args=(audio_path,), daemon=True)
+                t0 = time.monotonic()
+                player.start()
+
+                ui.clear_status()
+                ui.show_samantha(response)
+
+                player.join()
+                play_time = time.monotonic() - t0
+                ui.show_step("playback", play_time)
+            else:
+                ui.show_samantha(response)
         else:
             ui.show_samantha(response)
-
-        ui.clear_status()
 
 
 if __name__ == "__main__":

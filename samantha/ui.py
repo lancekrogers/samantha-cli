@@ -18,7 +18,10 @@ class Status(Enum):
 
     IDLE = "idle"
     LISTENING = "listening"
+    HEARING = "hearing"
+    TRANSCRIBING = "transcribing"
     THINKING = "thinking"
+    GENERATING = "generating"
     SPEAKING = "speaking"
     ERROR = "error"
 
@@ -26,11 +29,14 @@ class Status(Enum):
 # Status display configuration
 _STATUS_STYLES: dict[Status, tuple[str, str, str]] = {
     #                    (dot_color,  label,          style)
-    Status.IDLE:       ("dim",       "Ready",        "dim"),
-    Status.LISTENING:  ("green",     "Listening...",  "bold green"),
-    Status.THINKING:   ("yellow",    "Thinking...",   "bold yellow"),
-    Status.SPEAKING:   ("blue",      "Speaking...",   "bold blue"),
-    Status.ERROR:      ("red",       "Error",         "bold red"),
+    Status.IDLE:         ("dim",       "Ready",              "dim"),
+    Status.LISTENING:    ("green",     "Listening...",        "bold green"),
+    Status.HEARING:      ("green",     "Hearing you...",     "bold green"),
+    Status.TRANSCRIBING: ("cyan",      "Transcribing...",    "bold cyan"),
+    Status.THINKING:     ("yellow",    "Claude thinking...", "bold yellow"),
+    Status.GENERATING:   ("blue",      "Generating voice...", "bold blue"),
+    Status.SPEAKING:     ("magenta",   "Speaking...",         "bold magenta"),
+    Status.ERROR:        ("red",       "Error",               "bold red"),
 }
 
 
@@ -120,6 +126,10 @@ class UI:
         line.append(message, style="red")
         self.console.print(line)
         self.console.print()
+
+    def show_step(self, label: str, elapsed: float) -> None:
+        """Display a completed step with timing."""
+        self.console.print(f"  [dim]  {label} ({elapsed:.1f}s)[/dim]")
 
     def show_info(self, message: str) -> None:
         """Display an informational message."""
