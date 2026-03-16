@@ -3,6 +3,20 @@
 from __future__ import annotations
 
 
+def _default_mic_index() -> int | None:
+    """Get the system default input device index via PyAudio."""
+    try:
+        import pyaudio
+        p = pyaudio.PyAudio()
+        try:
+            info = p.get_default_input_device_info()
+            return info["index"]
+        finally:
+            p.terminate()
+    except Exception:
+        return None
+
+
 class GoogleSTTProvider:
     """STT using Google's free speech recognition service."""
 
@@ -30,7 +44,7 @@ class GoogleSTTProvider:
         recognizer = self._init_recognizer()
 
         try:
-            with sr.Microphone() as source:
+            with sr.Microphone(device_index=_default_mic_index()) as source:
                 recognizer.adjust_for_ambient_noise(source, duration=0.5)
                 audio = recognizer.listen(
                     source,

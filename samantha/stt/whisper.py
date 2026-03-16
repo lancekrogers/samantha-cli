@@ -5,6 +5,8 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
+from samantha.stt.google import _default_mic_index
+
 
 class WhisperSTTProvider:
     """STT using faster-whisper for local speech recognition."""
@@ -35,7 +37,7 @@ class WhisperSTTProvider:
         recognizer.energy_threshold = 300
 
         try:
-            with sr.Microphone() as source:
+            with sr.Microphone(device_index=_default_mic_index()) as source:
                 recognizer.adjust_for_ambient_noise(source, duration=0.5)
                 audio = recognizer.listen(
                     source,
