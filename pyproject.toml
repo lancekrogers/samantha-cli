@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=68.0"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "samantha-cli"
@@ -18,16 +18,29 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
+    "kokoro-onnx>=0.4",
+    "soundfile>=0.12",
     "SpeechRecognition>=3.10",
     "PyAudio>=0.2.14",
-    "fish-audio-sdk>=0.1",
     "rich>=13.0",
     "click>=8.0",
     "pyyaml>=6.0",
+    "python-dotenv>=1.0",
 ]
+
+[project.optional-dependencies]
+edge = ["edge-tts>=6.1"]
+fish = ["fish-audio-sdk>=0.1"]
+whisper = ["faster-whisper>=1.0"]
+local = ["faster-whisper>=1.0"]
+cloud = ["edge-tts>=6.1", "fish-audio-sdk>=0.1"]
+all = ["edge-tts>=6.1", "fish-audio-sdk>=0.1", "faster-whisper>=1.0"]
 
 [project.scripts]
 samantha = "samantha.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["samantha"]
 
 [project.urls]
 Homepage = "https://ethanplus.ai"
