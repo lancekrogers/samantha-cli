@@ -331,6 +331,8 @@ class UI:
 
         # If there's timing from a previous phase, show it
         if elapsed > 0:
+            if phase in ("listening", "hearing"):
+                return
             self.mic.stop()
             self.show_step(phase, elapsed)
             return
