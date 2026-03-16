@@ -9,8 +9,22 @@ from samantha.tts.base import TTSProvider
 
 def get_tts_provider(config: dict[str, Any]) -> TTSProvider:
     """Create a TTS provider from config settings."""
-    provider = config.get("tts_provider", "edge")
+    provider = config.get("tts_provider", "kokoro")
     speed = config.get("speech_speed", 1.0)
+
+    if provider == "kokoro":
+        from samantha.tts.kokoro import KokoroTTSProvider
+        return KokoroTTSProvider(
+            voice=config.get("tts_voice", "af_heart"),
+            speed=speed,
+        )
+
+    if provider == "edge":
+        from samantha.tts.edge import EdgeTTSProvider
+        return EdgeTTSProvider(
+            voice=config.get("tts_voice", "en-US-AriaNeural"),
+            speed=speed,
+        )
 
     if provider == "fish":
         from samantha.tts.fish import FishAudioProvider
@@ -20,8 +34,6 @@ def get_tts_provider(config: dict[str, Any]) -> TTSProvider:
             speed=speed,
         )
 
-    from samantha.tts.edge import EdgeTTSProvider
-    return EdgeTTSProvider(
-        voice=config.get("tts_voice", "en-US-AriaNeural"),
-        speed=speed,
-    )
+    # Fallback to kokoro
+    from samantha.tts.kokoro import KokoroTTSProvider
+    return KokoroTTSProvider(voice=config.get("tts_voice", "af_heart"), speed=speed)

@@ -144,8 +144,9 @@ def providers() -> None:
     console.print("  [bold]TTS (text-to-speech):[/bold]")
     tts_active = settings["tts_provider"]
     tts_options = [
-        ("edge", "edge-tts", "Free, no API key", True),
-        ("fish", "fish-audio-sdk", "Paid, custom voice clones", _check_import("fishaudio")),
+        ("kokoro", "kokoro-onnx", "Local, high quality, no API key", _check_import("kokoro_onnx")),
+        ("edge", "edge-tts", "Free cloud, no API key", _check_import("edge_tts")),
+        ("fish", "fish-audio-sdk", "Paid cloud, custom voice clones", _check_import("fishaudio")),
     ]
     for name, pkg, desc, installed in tts_options:
         marker = "[green]active[/green]" if name == tts_active else ("[dim]ready[/dim]" if installed else "[yellow]not installed[/yellow]")

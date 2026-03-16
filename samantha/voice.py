@@ -41,7 +41,8 @@ class VoiceEngine:
         if not self.tts_available:
             return None
 
-        output_path = str(self._temp_dir / "response.mp3")
+        ext = ".wav" if self.config.get("tts_provider") == "kokoro" else ".mp3"
+        output_path = str(self._temp_dir / f"response{ext}")
         try:
             return self.tts.generate(text, output_path)
         except Exception as e:

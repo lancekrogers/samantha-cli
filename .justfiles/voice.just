@@ -39,11 +39,20 @@ set-voice VOICE:
 set-speed SPEED:
     uv run samantha config speech_speed {{SPEED}}
 
-# Switch to edge-tts (free, default)
+# Switch to Kokoro (local, high quality, default)
+[no-cd]
+use-kokoro:
+    uv run samantha config tts_provider kokoro
+    uv run samantha config tts_voice af_heart
+    @echo "TTS switched to Kokoro (local, no API key)"
+
+# Switch to edge-tts (free cloud)
 [no-cd]
 use-edge:
+    uv pip install -e ".[edge]"
     uv run samantha config tts_provider edge
-    @echo "TTS switched to edge-tts (free, no API key)"
+    uv run samantha config tts_voice en-US-AriaNeural
+    @echo "TTS switched to edge-tts (free cloud)"
 
 # Switch to Fish Audio (requires API key)
 [no-cd]
@@ -67,11 +76,12 @@ use-google-stt:
     uv run samantha config stt_provider google
     @echo "STT switched to Google (free, requires internet)"
 
-# Go fully local (edge-tts + whisper)
+# Go fully local (kokoro + whisper)
 [no-cd]
 go-local MODEL="base":
     uv pip install -e ".[whisper]"
-    uv run samantha config tts_provider edge
+    uv run samantha config tts_provider kokoro
+    uv run samantha config tts_voice af_heart
     uv run samantha config stt_provider whisper
     uv run samantha config whisper_model {{MODEL}}
-    @echo "Fully local mode: edge-tts + whisper (model: {{MODEL}})"
+    @echo "Fully local mode: kokoro + whisper (model: {{MODEL}})"

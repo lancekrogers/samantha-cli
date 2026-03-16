@@ -19,8 +19,8 @@ CONFIG_FILE = CONFIG_DIR / "config.yaml"
 
 DEFAULTS: dict[str, Any] = {
     # TTS settings
-    "tts_provider": "edge",
-    "tts_voice": "en-US-AriaNeural",
+    "tts_provider": "kokoro",
+    "tts_voice": "af_heart",
     "speech_speed": 0.95,
 
     # STT settings

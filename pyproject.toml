@@ -18,7 +18,8 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "edge-tts>=6.1",
+    "kokoro-onnx>=0.4",
+    "soundfile>=0.12",
     "SpeechRecognition>=3.10",
     "PyAudio>=0.2.14",
     "rich>=13.0",
@@ -28,10 +29,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+edge = ["edge-tts>=6.1"]
 fish = ["fish-audio-sdk>=0.1"]
 whisper = ["faster-whisper>=1.0"]
 local = ["faster-whisper>=1.0"]
-all = ["fish-audio-sdk>=0.1", "faster-whisper>=1.0"]
+cloud = ["edge-tts>=6.1", "fish-audio-sdk>=0.1"]
+all = ["edge-tts>=6.1", "fish-audio-sdk>=0.1", "faster-whisper>=1.0"]
 
 [project.scripts]
 samantha = "samantha.cli:main"
