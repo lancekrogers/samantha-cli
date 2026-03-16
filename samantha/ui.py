@@ -6,9 +6,12 @@ and a scrolling conversation transcript.
 
 from __future__ import annotations
 
+import threading
+import time
 from enum import Enum
 
 from rich.console import Console
+from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
 
@@ -39,6 +42,89 @@ _STATUS_STYLES: dict[Status, tuple[str, str, str]] = {
     Status.ERROR:        ("red",       "Error",               "bold red"),
 }
 
+# Mic animation frames -- vertical bars that pulse like an audio waveform
+_MIC_FRAMES = [
+    "  ▁ ▃ ▅ ▇ ▅ ▃ ▁  ",
+    "  ▂ ▅ ▇ ▅ ▃ ▁ ▂  ",
+    "  ▃ ▇ ▅ ▃ ▁ ▂ ▃  ",
+    "  ▅ ▅ ▃ ▁ ▂ ▃ ▅  ",
+    "  ▇ ▃ ▁ ▂ ▃ ▅ ▇  ",
+    "  ▅ ▁ ▂ ▃ ▅ ▇ ▅  ",
+    "  ▃ ▂ ▃ ▅ ▇ ▅ ▃  ",
+    "  ▁ ▃ ▅ ▇ ▅ ▃ ▁  ",
+    "  ▂ ▁ ▇ ▅ ▇ ▁ ▂  ",
+    "  ▃ ▅ ▃ ▇ ▃ ▅ ▃  ",
+    "  ▅ ▇ ▁ ▅ ▁ ▇ ▅  ",
+    "  ▇ ▅ ▃ ▃ ▃ ▅ ▇  ",
+]
+
+
+class MicAnimation:
+    """Animated microphone indicator that runs in a background thread."""
+
+    def __init__(self, console: Console) -> None:
+        self._console = console
+        self._live: Live | None = None
+        self._thread: threading.Thread | None = None
+        self._stop_event = threading.Event()
+        self._label = "Listening..."
+        self._color = "green"
+
+    def start(self, label: str = "Listening...", color: str = "green") -> None:
+        """Start the mic animation."""
+        self.stop()  # Clean up any previous animation
+        self._label = label
+        self._color = color
+        self._stop_event.clear()
+        self._live = Live(
+            self._render_frame(0),
+            console=self._console,
+            refresh_per_second=10,
+            transient=True,
+        )
+        self._live.start()
+        self._thread = threading.Thread(target=self._animate, daemon=True)
+        self._thread.start()
+
+    def update_label(self, label: str, color: str | None = None) -> None:
+        """Update the label text without restarting the animation."""
+        self._label = label
+        if color:
+            self._color = color
+
+    def stop(self) -> None:
+        """Stop the animation and clean up."""
+        self._stop_event.set()
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=1.0)
+        if self._live:
+            try:
+                self._live.stop()
+            except Exception:
+                pass
+            self._live = None
+        self._thread = None
+
+    def _animate(self) -> None:
+        """Animation loop -- runs in background thread."""
+        frame_idx = 0
+        while not self._stop_event.is_set():
+            if self._live:
+                try:
+                    self._live.update(self._render_frame(frame_idx))
+                except Exception:
+                    break
+            frame_idx = (frame_idx + 1) % len(_MIC_FRAMES)
+            self._stop_event.wait(0.12)
+
+    def _render_frame(self, idx: int) -> Text:
+        """Render a single animation frame."""
+        frame = Text()
+        frame.append("  🎙 ", style=f"bold {self._color}")
+        frame.append(_MIC_FRAMES[idx % len(_MIC_FRAMES)], style=self._color)
+        frame.append(f" {self._label}", style=f"bold {self._color}")
+        return frame
+
 
 class UI:
     """Terminal interface for Samantha.
@@ -50,6 +136,7 @@ class UI:
 
     def __init__(self) -> None:
         self.console = Console()
+        self.mic = MicAnimation(self.console)
 
     def show_welcome(self) -> None:
         """Display the startup banner."""

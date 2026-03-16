@@ -283,6 +283,7 @@ def _run_assistant(text_mode: bool = False, no_voice: bool = False, brain: Brain
     except (KeyboardInterrupt, EOFError):
         pass
     finally:
+        ui.mic.stop()
         voice.cleanup()
         ui.show_goodbye()
 
@@ -296,12 +297,7 @@ def _conversation_loop(
     """Run the listen-think-speak loop until interrupted."""
     import time
 
-    # Wire up STT status callback so UI updates during listen/transcribe
-    _stt_status_map = {
-        "listening": Status.LISTENING,
-        "loading_model": Status.TRANSCRIBING,
-        "transcribing": Status.TRANSCRIBING,
-    }
+    # Wire up STT status callback to drive the mic animation
     _phase_times: dict[str, float] = {}
 
     def _on_stt_status(phase: str) -> None:
@@ -310,12 +306,20 @@ def _conversation_loop(
         if _phase_times.get("last_phase"):
             prev = _phase_times["last_phase"]
             elapsed = now - _phase_times.get("last_time", now)
-            ui.clear_status()
+            ui.mic.stop()
             ui.show_step(prev, elapsed)
         _phase_times["last_phase"] = phase
         _phase_times["last_time"] = now
-        status = _stt_status_map.get(phase, Status.LISTENING)
-        ui.show_status(status)
+
+        if phase == "listening":
+            ui.mic.start("Listening...", "green")
+        elif phase == "hearing":
+            ui.mic.update_label("Hearing you...", "green")
+        elif phase in ("loading_model", "transcribing"):
+            ui.mic.stop()
+            ui.show_status(Status.TRANSCRIBING)
+        else:
+            ui.mic.start("Listening...", "green")
 
     voice.stt.on_status = _on_stt_status
 
@@ -334,21 +338,21 @@ def _conversation_loop(
             try:
                 user_input = voice.listen()
             except KeyboardInterrupt:
+                ui.mic.stop()
                 break
             except RuntimeError as e:
-                ui.clear_status()
+                ui.mic.stop()
                 ui.show_error(str(e))
                 ui.show_info("Switching to text mode.")
                 text_mode = True
                 continue
 
+            ui.mic.stop()
+
             # Show final phase timing
             if _phase_times.get("last_phase"):
                 elapsed = time.monotonic() - _phase_times.get("last_time", t0)
-                ui.clear_status()
                 ui.show_step(_phase_times["last_phase"], elapsed)
-            else:
-                ui.clear_status()
 
             if user_input is None:
                 continue  # Silence or unrecognized -- keep listening
