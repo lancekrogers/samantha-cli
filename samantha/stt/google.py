@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Callable
+
 
 def _default_mic_index() -> int | None:
     """Get the system default input device index via PyAudio."""
@@ -23,6 +25,7 @@ class GoogleSTTProvider:
     def __init__(self, language: str = "en-US") -> None:
         self.language = language
         self._recognizer = None
+        self.on_status: Callable[[str], None] | None = None
 
     def _init_recognizer(self):
         if self._recognizer is not None:
@@ -43,6 +46,9 @@ class GoogleSTTProvider:
 
         recognizer = self._init_recognizer()
 
+        if self.on_status:
+            self.on_status("listening")
+
         try:
             with sr.Microphone(device_index=_default_mic_index()) as source:
                 recognizer.adjust_for_ambient_noise(source, duration=0.5)
@@ -58,6 +64,9 @@ class GoogleSTTProvider:
                 f"Could not access the microphone: {e}. "
                 "Check your audio input settings and permissions."
             ) from e
+
+        if self.on_status:
+            self.on_status("transcribing")
 
         try:
             text = recognizer.recognize_google(audio, language=self.language)

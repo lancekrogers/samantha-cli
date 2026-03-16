@@ -296,6 +296,29 @@ def _conversation_loop(
     """Run the listen-think-speak loop until interrupted."""
     import time
 
+    # Wire up STT status callback so UI updates during listen/transcribe
+    _stt_status_map = {
+        "listening": Status.LISTENING,
+        "loading_model": Status.TRANSCRIBING,
+        "transcribing": Status.TRANSCRIBING,
+    }
+    _phase_times: dict[str, float] = {}
+
+    def _on_stt_status(phase: str) -> None:
+        now = time.monotonic()
+        # Log timing of previous phase
+        if _phase_times.get("last_phase"):
+            prev = _phase_times["last_phase"]
+            elapsed = now - _phase_times.get("last_time", now)
+            ui.clear_status()
+            ui.show_step(prev, elapsed)
+        _phase_times["last_phase"] = phase
+        _phase_times["last_time"] = now
+        status = _stt_status_map.get(phase, Status.LISTENING)
+        ui.show_status(status)
+
+    voice.stt.on_status = _on_stt_status
+
     while True:
         # --- 1. Get user input ---
         if text_mode:
@@ -306,7 +329,7 @@ def _conversation_loop(
             if not user_input:
                 continue
         else:
-            ui.show_status(Status.LISTENING)
+            _phase_times.clear()
             t0 = time.monotonic()
             try:
                 user_input = voice.listen()
@@ -319,14 +342,18 @@ def _conversation_loop(
                 text_mode = True
                 continue
 
-            listen_time = time.monotonic() - t0
-            ui.clear_status()
+            # Show final phase timing
+            if _phase_times.get("last_phase"):
+                elapsed = time.monotonic() - _phase_times.get("last_time", t0)
+                ui.clear_status()
+                ui.show_step(_phase_times["last_phase"], elapsed)
+            else:
+                ui.clear_status()
 
             if user_input is None:
                 continue  # Silence or unrecognized -- keep listening
 
             ui.show_user(user_input)
-            ui.show_step("listen + transcribe", listen_time)
 
         # --- Natural language commands ---
         cmd = user_input.strip().lower()

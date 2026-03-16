@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
+from typing import Callable
 
 from samantha.stt.google import _default_mic_index
 
@@ -15,6 +16,7 @@ class WhisperSTTProvider:
         self.model_size = model_size
         self.language = language.split("-")[0]  # "en-US" -> "en"
         self._model = None
+        self.on_status: Callable[[str], None] | None = None
 
     def _init_model(self):
         if self._model is not None:
@@ -22,19 +24,23 @@ class WhisperSTTProvider:
 
         from faster_whisper import WhisperModel
 
+        if self.on_status:
+            self.on_status("loading_model")
         self._model = WhisperModel(self.model_size, compute_type="auto")
         return self._model
 
     def transcribe(self, timeout: int = 10, phrase_time_limit: int = 30) -> str | None:
         import speech_recognition as sr
 
-        # Use SpeechRecognition for mic capture only
         recognizer = sr.Recognizer()
         recognizer.pause_threshold = 3.0
         recognizer.phrase_threshold = 0.2
         recognizer.non_speaking_duration = 2.0
         recognizer.dynamic_energy_threshold = True
         recognizer.energy_threshold = 300
+
+        if self.on_status:
+            self.on_status("listening")
 
         try:
             with sr.Microphone(device_index=_default_mic_index()) as source:
@@ -52,7 +58,9 @@ class WhisperSTTProvider:
                 "Check your audio input settings and permissions."
             ) from e
 
-        # Save captured audio to temp WAV and transcribe locally
+        if self.on_status:
+            self.on_status("transcribing")
+
         wav_data = audio.get_wav_data()
         tmp = Path(tempfile.mktemp(suffix=".wav", prefix="samantha_stt_"))
         try:
