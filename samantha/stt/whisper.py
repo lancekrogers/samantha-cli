@@ -6,6 +6,7 @@ import tempfile
 from pathlib import Path
 from typing import Callable
 
+from samantha.stt.base import listen_with_activity
 from samantha.stt.google import _default_mic_index
 
 
@@ -17,6 +18,7 @@ class WhisperSTTProvider:
         self.language = language.split("-")[0]  # "en-US" -> "en"
         self._model = None
         self.on_status: Callable[[str], None] | None = None
+        self.on_level: Callable[[float], None] | None = None
 
     def _init_model(self):
         if self._model is not None:
@@ -45,10 +47,13 @@ class WhisperSTTProvider:
         try:
             with sr.Microphone(device_index=_default_mic_index()) as source:
                 recognizer.adjust_for_ambient_noise(source, duration=0.5)
-                audio = recognizer.listen(
+                audio = listen_with_activity(
+                    recognizer,
                     source,
                     timeout=timeout,
                     phrase_time_limit=phrase_time_limit,
+                    on_status=self.on_status,
+                    on_level=self.on_level,
                 )
         except sr.WaitTimeoutError:
             return None

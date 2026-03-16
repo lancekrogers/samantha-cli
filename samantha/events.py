@@ -37,6 +37,12 @@ class STTPhase(Event):
 
 
 @dataclass
+class MicLevel(Event):
+    """Live microphone input level while listening."""
+    level: float = 0.0
+
+
+@dataclass
 class ThinkingStarted(Event):
     """Claude is processing."""
 

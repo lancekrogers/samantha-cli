@@ -24,7 +24,7 @@ DEFAULTS: dict[str, Any] = {
     "speech_speed": 0.95,
 
     # STT settings
-    "stt_provider": "google",
+    "stt_provider": "whisper",
     "whisper_model": "base",
 
     # Fish Audio (only when tts_provider == "fish")

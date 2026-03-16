@@ -18,6 +18,7 @@ from samantha.events import (
     ReadyForInput,
     UserInput,
     STTPhase,
+    MicLevel,
     ThinkingStarted,
     ThinkingComplete,
     GeneratingVoice,
@@ -91,7 +92,11 @@ class ConversationEngine:
             # Emit current phase with zero elapsed (it just started)
             self.bus.emit(STTPhase(phase=phase, elapsed=0.0))
 
+        def _on_stt_level(level: float) -> None:
+            self.bus.emit(MicLevel(level=level))
+
         self.voice.stt.on_status = _on_stt_status
+        self.voice.stt.on_level = _on_stt_level
 
         while self._running:
             # --- 1. Get user input ---

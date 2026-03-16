@@ -9,6 +9,7 @@ the ConversationEngine, keeping display fully decoupled from logic.
 
 from __future__ import annotations
 
+import math
 import threading
 import time
 from enum import Enum
@@ -24,6 +25,7 @@ from samantha.events import (
     ReadyForInput,
     UserInput,
     STTPhase,
+    MicLevel,
     ThinkingStarted,
     ThinkingComplete,
     GeneratingVoice,
@@ -64,21 +66,29 @@ _STATUS_STYLES: dict[Status, tuple[str, str, str]] = {
     Status.ERROR:        ("red",       "Error",               "bold red"),
 }
 
-# Mic animation frames -- vertical bars that pulse like an audio waveform
-_MIC_FRAMES = [
-    "  ▁ ▃ ▅ ▇ ▅ ▃ ▁  ",
-    "  ▂ ▅ ▇ ▅ ▃ ▁ ▂  ",
-    "  ▃ ▇ ▅ ▃ ▁ ▂ ▃  ",
-    "  ▅ ▅ ▃ ▁ ▂ ▃ ▅  ",
-    "  ▇ ▃ ▁ ▂ ▃ ▅ ▇  ",
-    "  ▅ ▁ ▂ ▃ ▅ ▇ ▅  ",
-    "  ▃ ▂ ▃ ▅ ▇ ▅ ▃  ",
-    "  ▁ ▃ ▅ ▇ ▅ ▃ ▁  ",
-    "  ▂ ▁ ▇ ▅ ▇ ▁ ▂  ",
-    "  ▃ ▅ ▃ ▇ ▃ ▅ ▃  ",
-    "  ▅ ▇ ▁ ▅ ▁ ▇ ▅  ",
-    "  ▇ ▅ ▃ ▃ ▃ ▅ ▇  ",
+# Idle mic frames -- very subtle breathing dot, barely moving.
+# Shows "I'm listening" without looking like you're talking.
+_MIC_FRAMES_IDLE = [
+    "  · · · ▁ · · ·  ",
+    "  · · ▁ ▁ ▁ · ·  ",
+    "  · · ▁ ▂ ▁ · ·  ",
+    "  · · ▁ ▁ ▁ · ·  ",
 ]
+
+# Active mic frames -- lively waveform for when speech is detected.
+_MIC_FRAMES_ACTIVE = [
+    "  ▁ ▂ ▃ ▅ ▃ ▂ ▁  ",
+    "  ▁ ▃ ▅ ▅ ▅ ▃ ▁  ",
+    "  ▂ ▃ ▅ ▇ ▅ ▃ ▂  ",
+    "  ▃ ▅ ▇ ▇ ▇ ▅ ▃  ",
+    "  ▅ ▅ ▇ ▇ ▇ ▅ ▅  ",
+    "  ▃ ▅ ▇ ▇ ▇ ▅ ▃  ",
+    "  ▂ ▃ ▅ ▇ ▅ ▃ ▂  ",
+    "  ▁ ▃ ▅ ▅ ▅ ▃ ▁  ",
+]
+
+_MIC_BARS = ("·", "▁", "▂", "▃", "▄", "▅", "▆", "▇")
+_MIC_PROFILE = (0.35, 0.6, 0.85, 1.0, 0.85, 0.6, 0.35)
 
 
 class MicAnimation:
@@ -91,22 +101,36 @@ class MicAnimation:
         self._stop_event = threading.Event()
         self._label = "Listening..."
         self._color = "green"
+        self._active = False  # idle vs active (speech detected)
+        self._level = 0.0
+        self._display_level = 0.0
 
     def start(self, label: str = "Listening...", color: str = "green") -> None:
-        """Start the mic animation."""
+        """Start the mic animation in idle mode."""
         self.stop()  # Clean up any previous animation
         self._label = label
         self._color = color
+        self._active = False
+        self._level = 0.0
+        self._display_level = 0.0
         self._stop_event.clear()
         self._live = Live(
             self._render_frame(0),
             console=self._console,
-            refresh_per_second=10,
+            refresh_per_second=12,
             transient=True,
         )
         self._live.start()
         self._thread = threading.Thread(target=self._animate, daemon=True)
         self._thread.start()
+
+    def set_active(self, active: bool = True) -> None:
+        """Switch between idle (waiting) and active (hearing speech) animation."""
+        self._active = active
+
+    def set_level(self, level: float) -> None:
+        """Update the live microphone level."""
+        self._level = max(0.0, min(level, 1.0))
 
     def update_label(self, label: str, color: str | None = None) -> None:
         """Update the label text without restarting the animation."""
@@ -131,21 +155,43 @@ class MicAnimation:
         """Animation loop -- runs in background thread."""
         frame_idx = 0
         while not self._stop_event.is_set():
+            target = self._level
+            if target >= self._display_level:
+                self._display_level += (target - self._display_level) * 0.65
+            else:
+                self._display_level += (target - self._display_level) * 0.3
+
             if self._live:
                 try:
                     self._live.update(self._render_frame(frame_idx))
                 except Exception:
                     break
-            frame_idx = (frame_idx + 1) % len(_MIC_FRAMES)
-            self._stop_event.wait(0.12)
+            frame_idx += 1
+            interval = 0.08 if self._active or self._display_level > 0.05 else 0.25
+            self._stop_event.wait(interval)
 
     def _render_frame(self, idx: int) -> Text:
         """Render a single animation frame."""
+        if self._active or self._display_level > 0.05:
+            waveform = self._render_live_wave()
+        else:
+            frames = _MIC_FRAMES_IDLE
+            waveform = frames[idx % len(frames)]
+
         frame = Text()
         frame.append("  🎙 ", style=f"bold {self._color}")
-        frame.append(_MIC_FRAMES[idx % len(_MIC_FRAMES)], style=self._color)
+        frame.append(waveform, style=self._color)
         frame.append(f" {self._label}", style=f"bold {self._color}")
         return frame
+
+    def _render_live_wave(self) -> str:
+        """Render a waveform whose height tracks the measured mic level."""
+        bars = []
+        for weight in _MIC_PROFILE:
+            scaled = self._display_level * weight
+            idx = min(len(_MIC_BARS) - 1, max(0, math.ceil(scaled * (len(_MIC_BARS) - 1))))
+            bars.append(_MIC_BARS[idx])
+        return f"  {' '.join(bars)}  "
 
 
 class UI:
@@ -265,6 +311,7 @@ class UI:
         self._bus = bus
 
         bus.subscribe(STTPhase, self._on_stt_phase)
+        bus.subscribe(MicLevel, self._on_mic_level)
         bus.subscribe(UserInput, self._on_user_input)
         bus.subscribe(ThinkingStarted, self._on_thinking_started)
         bus.subscribe(ThinkingComplete, self._on_thinking_complete)
@@ -292,12 +339,16 @@ class UI:
         if phase == "listening":
             self.mic.start("Listening...", "green")
         elif phase == "hearing":
-            self.mic.update_label("Hearing you...", "green")
+            self.mic.start("Hearing you...", "green")
+            self.mic.set_active(True)
         elif phase in ("loading_model", "transcribing"):
             self.mic.stop()
             self.show_status(Status.TRANSCRIBING)
         else:
             self.mic.start("Listening...", "green")
+
+    def _on_mic_level(self, event: MicLevel) -> None:
+        self.mic.set_level(event.level)
 
     def _on_user_input(self, event: UserInput) -> None:
         self.mic.stop()
