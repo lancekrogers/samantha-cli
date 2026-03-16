@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=68.0"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "samantha-cli"
@@ -28,6 +28,9 @@ dependencies = [
 
 [project.scripts]
 samantha = "samantha.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["samantha"]
 
 [project.urls]
 Homepage = "https://ethanplus.ai"
